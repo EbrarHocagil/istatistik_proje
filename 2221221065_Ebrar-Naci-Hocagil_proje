@@ -1,27 +1,41 @@
 # Gerekli kütüphaneleri içe aktar
 import math
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import wilcoxon
 
 # Veri setini oku ve eksik değerleri çıkar
 dataset = pd.read_csv("top-rated-coffee-clean.csv")
-scores = dataset["total_score"].dropna()
+scores = dataset["total_score"].dropna().tolist()
 
-# Temel istatistikleri hesapla
-ortalama = np.mean(scores)
-medyan = np.median(scores)
-std = np.std(scores, ddof=1) 
-varyans = np.var(scores, ddof=1)
+# Gözlem sayısı
 n = len(scores)
-stdhata = std / np.sqrt(n)  
+
+# 1) Ortalama (mean) = sum(x_i) / n
+ortalama = sum(scores) / n
+
+# 2) Medyan (median): sıralı veri ortancası
+sirali = sorted(scores)
+if n % 2 == 1:
+    medyan = sirali[n//2]
+else:
+    medyan = (sirali[n//2 - 1] + sirali[n//2]) / 2
+
+# 3) Varyans (s^2) = sum((x_i - mean)^2) / (n - 1)
+varyans = sum((x - ortalama)**2 for x in scores) / (n - 1)
+
+# 4) Standart sapma (s) = sqrt(varyans)
+std = math.sqrt(varyans)
+
+# 5) Standart hata (SE) = s / sqrt(n)
+stdhata = std / math.sqrt(n)
 
 # Temel değerleri yazdır
 print("Ortalama:", round(ortalama, 4))
-print("Medyan:", round(medyan, 4))
+print("Medyan:",   round(medyan,   4))
 print("Standart Sapma:", round(std, 4))
-print("Varyans:", round(varyans, 4))
-print("Standart Hata:", round(stdhata, 4))
+print("Varyans:",        round(varyans, 4))
+print("Standart Hata:",  round(stdhata, 4))
 
 # Histogram grafiği 
 plt.hist(scores, bins=20, color="lightgreen", edgecolor="black")
@@ -39,42 +53,49 @@ plt.show()
 # Ortalama için %95 güven aralığı 
 dfree = n - 1
 z = 1.96 
+# Cornish–Fisher ile yaklaşık t_crit
 t_crit = z + (z**3 + z) / (4 * dfree)
 alt_sinir = ortalama - t_crit * stdhata
 ust_sinir = ortalama + t_crit * stdhata
 print("Ortalama için %95 güven aralığı:", 
       "({:.2f}, {:.2f})".format(alt_sinir, ust_sinir))
 
-# varyan için %95 güven aralığı
-dfree = n - 1
-z_upper = -1.96   # 1 - alpha/2 → 0.975 noktasının z-skoru = -z_{0.025}
-z_lower = 1.96    # alpha/2 → 0.025 noktasının z-skoru =  z_{0.975}
+# Varyans için %95 güven aralığı (Wilson–Hilferty yaklaşık)
+z_upper = -1.96  
+z_lower =  1.96  
 chi2_alt = dfree * (1 - 2/(9*dfree) + z_upper * math.sqrt(2/(9*dfree)))**3
 chi2_ust = dfree * (1 - 2/(9*dfree) + z_lower * math.sqrt(2/(9*dfree)))**3
 var_lower = dfree * varyans / chi2_ust
 var_upper = dfree * varyans / chi2_alt
 print(f"Varyans için %95 güven aralığı (yaklaşık): ({var_lower:.4f}, {var_upper:.4f})")
-# Aykırı değerleri bul (IQR yöntemine göre)
-q1 = scores.quantile(0.25)
-q3 = scores.quantile(0.75)
+
+# Aykırı değerleri bul (IQR yöntemi)
+q1 = pd.Series(sirali).quantile(0.25)
+q3 = pd.Series(sirali).quantile(0.75)
 iqr = q3 - q1
-alt_sinir = q1 - 1.5 * iqr
-ust_sinir = q3 + 1.5 * iqr
-aykirilar = scores[(scores < alt_sinir) | (scores > ust_sinir)]
+alt_s = q1 - 1.5 * iqr
+ust_s = q3 + 1.5 * iqr
+aykirilar = [x for x in scores if x < alt_s or x > ust_s]
 print("Aykırı değer sayısı:", len(aykirilar))
 
-# Hipotez testi (ortalama 94 mü değil mi diye bakıyoruz)
-mu0 = 94
-t_stat = (ortalama - mu0) / stdhata
-print("t-istatistiği (manuel):", round(t_stat, 4))
+# Hipotez testi (ortalama 94 mü değil mi)
 
-# Yaklaşık tablo değeri 2 olarak alınmış
-if abs(t_stat) > 2.0:
-    print("H0 reddedildi.")  # ortalama 94'ten farklı olabilir
+hypothesized_median = 94
+differences = [x - hypothesized_median for x in scores]
+stat, p_value = wilcoxon(differences)
+print(f"Test istatistiği {stat}")
+print(f"P-değeri {p_value}")
+if p_value < 0.05:
+    print("Kabul edildi")
 else:
-    print("H0 reddedilemedi.")  # ortalama 94 olabilir
+    print("Reddedildi")
 
-# Örneklem büyüklüğü (±0.1 hata ve %90 güven için)
-z = 1.645
-n_gerekli = (z * std / 0.1) ** 2
+
+# Örneklem büyüklüğü (±0.1 hata ve %90 güven)
+z90 = 1.645
+n_gerekli = (z90 * std / 0.1) ** 2
 print("Gerekli örneklem büyüklüğü:", round(n_gerekli))
+
+
+
+
